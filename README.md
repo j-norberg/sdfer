@@ -39,7 +39,8 @@ Spread=8
 
 1. clone this repo locally
 ```bash
-git clone https://bitbucket.org/j_norberg/sdfer.git
+git clone https://github.com/j-norberg/sdfer.git
+
 cd sdfer
 ```
 
