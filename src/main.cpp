@@ -74,24 +74,33 @@ FileFormats parse_file_format(const char* arg)
 
 
 
-
+const char *app_name = "sdfer 1.0";
 
 void print_usage()
 {
-	puts("sdfer 1.0" );
-	puts("usage: sdfer [opts] infile1.png [infile2.tga]");
-	puts("opts:");
-	puts(" -h     : help");
-	puts(" -v     : print details of operation");
-	puts(" -t=127 : threshold  (integer 0..254)     (default: 127)");
-	puts(" -i     : invert inside-outside");
-	puts(" -p     : pad");
-	puts(" -s=100 : spread     (integer 1+)         (default: 100)");
-	puts(" -d=2   : downsample (integer  1+)        (default:   2)");
-	puts(" -c     : crop");
-	puts(" -f=png : out-file-format png tga bmp jpg (default: png)");
+	puts(app_name);
 
-	puts(" --test : run tests");
+	const char *long_string = R""""(
+usage: sdfer [opts] infile1.png [infile2.tga]
+
+opts:
+	-h     : show help
+	-v     : print details of operation
+
+	-t=127 : threshold  (integer 0..254)     (default: 127)
+	-i     : invert inside-outside");
+	-p     : pad
+	-s=100 : spread     (integer 1+)         (default: 100)
+	-d=2   : downsample (integer 1+)         (default:   2)
+	-c     : crop
+
+	-f=png : out-file-format, one of: png, tga, bmp, jpg (default: png)
+
+	--help : show help
+	--test : run internal tests
+)"""";
+
+	puts(long_string);
 
 	// fixme allow:
 	// out-directory
@@ -100,8 +109,45 @@ void print_usage()
 
 void print_help()
 {
-	puts("sdfer 1.0");
-	puts("heeeeelp");
+	const char *long_string = R""""(
+Explanation of the options:
+
+-t=127 Threshhold
+	When the input-image is read, the threshold-value determines
+	what pixel is considered a part of the masked image. Defaults
+	to 127, can be between 0 and 254 inclusive.
+
+-i Invert
+	When the input-image is read, anything above the threshold-value
+	is considered part of the masked image. When -i is active the
+	result is inverted, so anything above the threshold is
+	considered outside.
+
+-p Pad
+	When the pad-option is active, the input-image is enlarged with
+	the spread-amount in every direction, this ensures that the
+	full fade-out will be present in the out-image, and not cut off.
+
+-s=100 Spread
+	The signed distance field will extend this far (in pixels). For
+	use with font-shapes or similar usage, lower number will give
+	you better resolution, but for a larger value can enable more
+	advanced features (blur, shadow, outlines)
+
+-d=2 Downsample
+	This option allow you to down-sample the output-image. This	is
+	common to increase the fidelity of angles in shapes.
+
+-c Crop
+	This options will look at the output image and crop it so that
+	the fade touches the edges in each direction.
+
+Examples go here:
+
+)"""";
+
+	puts(app_name);
+	puts(long_string);
 }
 
 
@@ -127,6 +173,7 @@ struct Args
 
 	bool verbose = false;
 	bool help = false;
+	bool test = false;
 
 	// non-opts
 	std::vector<char*> file_names;
@@ -149,18 +196,15 @@ void handle_opts(Args& args_out, int argc, char**argv, int i)
 	if (*arg_run == '-')
 	{
 		++arg_run;
-		// handle --test
-		// --help?
+
 		if (0 == strcmp(arg_run, "test"))
 		{
-			// handle test
-			sdfer_tests();
+			args_out.test = true;
 			return;
 		}
 
 		if (0 == strcmp(arg_run, "help"))
 		{
-			// handle test
 			args_out.help = true;
 			return;
 		}
@@ -284,6 +328,7 @@ bool handle_args(Args& args_out, int argc, char**argv)
 	if (argc < 2)
 	{
 		// fast skip for no args
+		print_usage();
 		return false;
 	}
 
@@ -303,6 +348,19 @@ bool handle_args(Args& args_out, int argc, char**argv)
 
 	// check args
 	bool ok = true;
+
+	// need help?
+	if (args_out.help)
+	{
+		print_help();
+		return false;
+	}
+
+	if (args_out.test)
+	{
+		sdfer_tests();
+		return false;
+	}
 
 	// any files
 	if (args_out.file_names.size() < 1)
@@ -349,14 +407,6 @@ bool handle_args(Args& args_out, int argc, char**argv)
 	{
 		print_usage();
 	}
-	else
-	{
-		if (args_out.help)
-		{
-			print_help();
-			ok = false;
-		}
-	}
 
 	// if there is no worse issue, test for half-bad inputs
 	if (ok)
@@ -377,110 +427,8 @@ bool handle_args(Args& args_out, int argc, char**argv)
 
 
 
-// allocate new and delete old
-// only single channel mask-image
-// memcpy is safe since writing to new memory
-uint8_t* replace_with_padded_image(uint8_t* src_img, int w, int h, int pad)
-{
-	int pw = w + pad * 2;
-	int ph = h + pad * 2;
-
-	uint8_t* dst_img = (uint8_t*)malloc(pw * ph);
-
-	// top band
-	memset(dst_img, 0, pw*pad);
-
-	int last_h = h - 1;
-
-	// middle
-	for (int y = 0; y < h; ++y)
-	{
-		uint8_t* src_row = src_img + y * w;
-		uint8_t* dst_row = dst_img + (pad + y) * pw;
-
-		if (y == 0)
-		{
-			// left (for other scanline this was included in right-side from last scanline)
-			memset(dst_row, 0, pad);
-		}
-
-		// mid
-		memcpy(dst_row + pad, src_row, w);
-
-		// right
-		if (y < last_h)
-		{
-			// single call includes next scanline
-			memset(dst_row + pad + w, 0, pad * 2);
-		}
-		else
-		{
-			// last row only do my scanline
-			memset(dst_row + pad + w, 0, pad);
-		}
-	}
-
-	// bottom band
-	memset(dst_img + (ph-pad) * pw, 0, pw*pad);
-
-	stbi_image_free(src_img);
-	return dst_img;
-}
 
 
-// adjust w and h
-void crop_in_place(uint8_t* src_img, int& w_inout, int &h_inout)
-{
-	int oW = w_inout;
-	int oH = h_inout;
-
-	// 1 find top-left-bottom-right (fixme can optimize)
-	int x0 = oW;
-	int x1 = 0;
-	int y0 = oH;
-	int y1 = 0;
-	for (int y = 0; y < oH; ++y)
-	{
-		uint8_t* row = src_img + y * oW;
-		for (int x = 0; x < oW; ++x)
-		{
-			if (row[x])
-			{
-				if (x < x0) x0 = x;
-				if (x > x1) x1 = x;
-
-				if (y < y0) y0 = y;
-				if (y > y1) y1 = y;
-			}
-		}
-	}
-
-	// make range valid
-	x1 += 1;
-	y1 += 1;
-
-	// new w,h
-	int nW = x1 - x0;
-	int nH = y1 - y0;
-
-	if (nW == oW && nH == oH)
-	{
-		// nothing to crop
-		return;
-	}
-
-	// 2. copy (memmove)
-	for (int y = 0; y < nH; ++y)
-	{
-		uint8_t* dst_row = src_img + y * nW;
-		uint8_t* src_row = src_img + (y0+y) * oW + x0;
-		memmove(dst_row, src_row, nW);
-	}
-
-	// 3. adjust w, h
-	w_inout = nW;
-	h_inout = nH;
-}
 
 bool handle_one_image( const char* fname, Args args )
 {
@@ -532,16 +480,24 @@ bool handle_one_image( const char* fname, Args args )
 	}
 
 	// extract mask
-	sdfer_masker_extract_mask_in_place(input_image, w, h, channels, extractChannel, args.threshold, args.invert);
-
+	sdfer_extract_mask_in_place(input_image, w, h, channels, extractChannel, args.threshold, args.invert);
 
 	int spread = args.spread;
 
 	// pad mask-image
 	if (args.pad)
 	{
-		// replacement
-		input_image = replace_with_padded_image(input_image, w, h, spread);
+		// allocate padded-replacement
+		int pw = w + spread * 2;
+		int ph = h + spread * 2;
+		uint8_t* dst_img = (uint8_t*)malloc(pw * ph);
+		sdfer_pad_mask(dst_img, input_image, w, h, spread);
+
+		// free old
+		stbi_image_free(input_image);
+		
+		// 
+		input_image = dst_img;
 		w += spread * 2;
 		h += spread * 2;
 
@@ -551,16 +507,12 @@ bool handle_one_image( const char* fname, Args args )
 		}
 	}
 
-
-	// allocate outside sdfer-code
-	std::vector<uint8_t> scratchpad(sdfer_need_scratchpad_bytes(w, h));
-
 	// process
-	sdfer_process_in_place(input_image, w, h, args.downsample, args.spread, w, h, &scratchpad[0]);
+	sdfer_process_in_place(input_image, w, h, args.downsample, args.spread, w, h);
 
 	if (args.crop)
 	{
-		crop_in_place(input_image, w, h);
+		sdfer_crop_image_in_place(input_image, w, h);
 	}
 
 	// choose right file format

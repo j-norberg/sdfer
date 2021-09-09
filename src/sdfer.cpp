@@ -1,4 +1,6 @@
 #include <cmath> // for sqrtf
+#include <cstring> // for memset
+#include <vector>
 
 #include "sdfer.h"
 
@@ -47,9 +49,8 @@ float get_diff_ms(timepoint t0, timepoint t1) { return 0.f; }
 
 
 
-
 // step 1
-void sdfer_masker_extract_mask_in_place(uint8_t* data, int w, int h, int channels, int extract_channel, int threshold, bool invert)
+void sdfer_extract_mask_in_place(uint8_t* data, int w, int h, int channels, int extract_channel, int threshold, bool invert)
 {
 	int s = w * h;
 	int rI = 0;
@@ -106,6 +107,107 @@ void sdfer_masker_extract_mask_in_place(uint8_t* data, int w, int h, int channel
 }
 
 
+
+
+// only single channel mask-image
+// memcpy is safe since writing to new memory
+void sdfer_pad_mask(uint8_t* dst_img, const uint8_t* src_img, int w, int h, int pad)
+{
+	int pw = w + pad * 2;
+	int ph = h + pad * 2;
+
+	// top band
+	memset(dst_img, 0, pw*pad);
+
+	int last_h = h - 1;
+
+	// middle
+	for (int y = 0; y < h; ++y)
+	{
+		const uint8_t* src_row = src_img + y * w;
+		uint8_t* dst_row = dst_img + (pad + y) * pw;
+
+		if (y == 0)
+		{
+			// left (for other scanline this was included in right-side from last scanline)
+			memset(dst_row, 0, pad);
+		}
+
+		// mid
+		memcpy(dst_row + pad, src_row, w);
+
+		// right
+		if (y < last_h)
+		{
+			// single call includes next scanline
+			memset(dst_row + pad + w, 0, pad * 2);
+		}
+		else
+		{
+			// last row only do my scanline
+			memset(dst_row + pad + w, 0, pad);
+		}
+	}
+
+	// bottom band
+	memset(dst_img + (ph - pad) * pw, 0, pw*pad);
+}
+
+
+
+// adjust w and h
+void sdfer_crop_image_in_place(uint8_t* src_img, int& w_inout, int &h_inout)
+{
+	int oW = w_inout;
+	int oH = h_inout;
+
+	// 1 find top-left-bottom-right (fixme can optimize)
+	int x0 = oW;
+	int x1 = 0;
+	int y0 = oH;
+	int y1 = 0;
+	for (int y = 0; y < oH; ++y)
+	{
+		uint8_t* row = src_img + y * oW;
+		for (int x = 0; x < oW; ++x)
+		{
+			if (row[x])
+			{
+				if (x < x0) x0 = x;
+				if (x > x1) x1 = x;
+
+				if (y < y0) y0 = y;
+				if (y > y1) y1 = y;
+			}
+		}
+	}
+
+	// make range valid
+	x1 += 1;
+	y1 += 1;
+
+	// new w,h
+	int nW = x1 - x0;
+	int nH = y1 - y0;
+
+	if (nW == oW && nH == oH)
+	{
+		// nothing to crop
+		return;
+	}
+
+	// 2. copy (memmove)
+	for (int y = 0; y < nH; ++y)
+	{
+		uint8_t* dst_row = src_img + y * nW;
+		uint8_t* src_row = src_img + (y0 + y) * oW + x0;
+		memmove(dst_row, src_row, nW);
+	}
+
+	// 3. adjust w, h
+	w_inout = nW;
+	h_inout = nH;
+}
 
 
 
@@ -447,20 +549,20 @@ static void sdfer_final_pass(uint8_t* img, const sdfer_cell* cells, int stride, 
 }
 
 
-int sdfer_need_scratchpad_bytes(int w, int h)
-{
-	return sizeof(sdfer_cell) * w*h;
-}
 
-void sdfer_process_in_place(uint8_t* data_inout, int w, int h, int downsample, int spread, int& outW, int& outH, uint8_t* scratchpad, bool verbose)
+
+
+
+void sdfer_process_in_place(uint8_t* data_inout, int w, int h, int downsample, int spread, int& w_out, int& h_out, bool verbose)
 {
 	// fixme fail on an image that's too large
 	// since we use int16_t for coordinates
 
-	outW = w / downsample;
-	outH = h / downsample;
+	w_out = w / downsample;
+	h_out = h / downsample;
 
-	sdfer_cell* cells = (sdfer_cell*)scratchpad;
+	std::vector<sdfer_cell> cells_vector(w*h);
+	sdfer_cell* cells = &cells_vector[0];
 
 	auto t0 = get_now();
 
@@ -472,7 +574,7 @@ void sdfer_process_in_place(uint8_t* data_inout, int w, int h, int downsample, i
 
 	auto t2 = get_now();
 
-	sdfer_final_pass(data_inout, cells, w, outW, outH, spread, downsample);
+	sdfer_final_pass(data_inout, cells, w, w_out, h_out, spread, downsample);
 
 	auto t3 = get_now();
 

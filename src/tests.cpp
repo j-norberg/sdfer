@@ -2,7 +2,6 @@
 
 #include <stdint.h>
 #include <vector>
-#include <cstring> // for strrchr
 #include <string>
 
 #include "sdfer.h"
@@ -17,9 +16,7 @@ int diff_img(const uint8_t* img_a, const uint8_t* img_b, int w, int h)
 	int m = 0;
 	for (int i = 0; i < s; ++i)
 	{
-		int a = img_a[i];
-		int b = img_b[i];
-		int d = a - b;
+		int d = img_a[i] - img_b[i];
 		
 		if (d < 0)
 			d = -d;
@@ -31,7 +28,32 @@ int diff_img(const uint8_t* img_a, const uint8_t* img_b, int w, int h)
 	return m;
 }
 
-bool perform_test(
+
+
+
+
+
+
+void test_mask()
+{
+	// expected behavior around thresholds
+	// test short and long to expsoe unrolling-issues
+	// test 0, 127, 128, and 255?
+}
+
+void test_pad()
+{
+}
+
+void test_crop()
+{
+
+}
+
+
+
+
+bool perform_test_sdf(
 	int w,
 	int h,
 	std::vector<uint8_t> img,
@@ -60,10 +82,9 @@ bool perform_test(
 	}
 
 	bool verbose = false;
-	std::vector<uint8_t> scratchpad(sdfer_need_scratchpad_bytes(w, h));
 	int oW;
 	int oH;
-	sdfer_process_in_place(&img[0], w, h, downscale, spread, oW, oH, &scratchpad[0], verbose);
+	sdfer_process_in_place(&img[0], w, h, downscale, spread, oW, oH, verbose);
 
 	int oS = oW * oH;
 	if (expected_img.size() != oS)
@@ -89,25 +110,25 @@ bool perform_test(
 void test_strips()
 {
 	// 2x1 / 1x2
-	perform_test(2, 1, { 0, 1 }, 1, 1, { 64, 192 }, "2x1-1-1");
-	perform_test(1, 2, { 0, 1 }, 1, 1, { 64, 192 }, "1x2-1-1");
+	perform_test_sdf(2, 1, { 0, 1 }, 1, 1, { 64, 192 }, "2x1-1-1");
+	perform_test_sdf(1, 2, { 0, 1 }, 1, 1, { 64, 192 }, "1x2-1-1");
 
 	// 3x1 / 1x3
-	perform_test(3, 1, { 0, 1, 0 }, 1, 1, { 64, 192, 64 }, "3x1-1-1");
-	perform_test(1, 3, { 0, 1, 0 }, 1, 1, { 64, 192, 64 }, "1x3-1-1");
+	perform_test_sdf(3, 1, { 0, 1, 0 }, 1, 1, { 64, 192, 64 }, "3x1-1-1");
+	perform_test_sdf(1, 3, { 0, 1, 0 }, 1, 1, { 64, 192, 64 }, "1x3-1-1");
 
 	// 4x1 / 4x1
-	perform_test(4, 1, { 1, 1, 0, 0 }, 1, 1, { 255, 192, 64, 0 }, "4x1-1-1");
-	perform_test(1, 4, { 1, 1, 0, 0 }, 1, 1, { 255, 192, 64, 0 }, "1x4-1-1");
+	perform_test_sdf(4, 1, { 1, 1, 0, 0 }, 1, 1, { 255, 192, 64, 0 }, "4x1-1-1");
+	perform_test_sdf(1, 4, { 1, 1, 0, 0 }, 1, 1, { 255, 192, 64, 0 }, "1x4-1-1");
 
 	// spread 2
-	perform_test(6, 1, { 1, 1, 1, 0, 0, 0 }, 1, 2, { 255, 224, 160, 96, 32, 0 }, "6x1-1-2");
-	perform_test(1, 6, { 1, 1, 1, 0, 0, 0 }, 1, 2, { 255, 224, 160, 96, 32, 0 }, "1x6-1-2");
+	perform_test_sdf(6, 1, { 1, 1, 1, 0, 0, 0 }, 1, 2, { 255, 224, 160, 96, 32, 0 }, "6x1-1-2");
+	perform_test_sdf(1, 6, { 1, 1, 1, 0, 0, 0 }, 1, 2, { 255, 224, 160, 96, 32, 0 }, "1x6-1-2");
 }
 
 void test_squares()
 {
-	perform_test(3, 3, { 0,0,0, 0,1,0, 0,0,0 }, 1, 1, { 0,64,0, 64,192,64, 0,64,0 }, "3x3-1-1");
+	perform_test_sdf(3, 3, { 0,0,0, 0,1,0, 0,0,0 }, 1, 1, { 0,64,0, 64,192,64, 0,64,0 }, "3x3-1-1");
 }
 
 
@@ -115,16 +136,16 @@ void test_squares()
 void test_downscale()
 {
 	// should be same (similar) result as 2x1
-	perform_test(4, 2, { 0,0,1,1, 0,0,1,1 }, 2, 2, { 64, 192 }, "4x1-2-2");
+	perform_test_sdf(4, 2, { 0,0,1,1, 0,0,1,1 }, 2, 2, { 64, 192 }, "4x1-2-2");
 
 	// should blend down to 'on the edge'
-	perform_test(4, 4, { 0,1,0,1, 1,0,1,0, 0,1,0,1, 1,0,1,0 }, 2, 2, { 128, 128, 128, 128 }, "4x4-2-2");
+	perform_test_sdf(4, 4, { 0,1,0,1, 1,0,1,0, 0,1,0,1, 1,0,1,0 }, 2, 2, { 128, 128, 128, 128 }, "4x4-2-2");
 }
 
 void test_edge()
 {
 	// make sure the edge is maintained at 127.5
-	perform_test(2, 1, { 0,1 }, 1, 127, { 127, 128 }, "2x1-1-127");
+	perform_test_sdf(2, 1, { 0,1 }, 1, 127, { 127, 128 }, "2x1-1-127");
 }
 
 
@@ -132,6 +153,12 @@ void test_edge()
 
 void sdfer_tests()
 {
+	// test masking, cropping padding
+	test_mask();
+	test_pad();
+	test_crop();
+
+	// test actual sdf-code
 	test_strips();
 	test_squares();
 	test_downscale();

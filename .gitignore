@@ -1,7 +1,7 @@
-platWin/.vs
-platWin/Debug
-platWin/Release
-platWin/x64/Debug
-platWin/x64/Release
+plat_win/.vs
+plat_win/Debug
+plat_win/Release
+plat_win/x64/Debug
+plat_win/x64/Release
 *.exe
 *png.sdf.png
