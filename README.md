@@ -38,8 +38,9 @@ Spread=8
 
 (For Windows, install Msys2, also the executable becomes "sdfer.exe")
 
-1. clone this repo locally
+1. clone ok_sdf and this repo locally
 ```bash
+git clone https://github.com/j-norberg/ok_sdf.git
 git clone https://github.com/j-norberg/sdfer.git
 
 cd sdfer
