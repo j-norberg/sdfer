@@ -4,10 +4,7 @@
 #include <vector>
 #include <string>
 
-#include "sdfer.h"
-
-
-
+#include "../../ok_sdf/src/ok_sdf.h"
 
 // returns the largest error
 int diff_img(const uint8_t* img_a, const uint8_t* img_b, int w, int h)
@@ -84,7 +81,7 @@ bool perform_test_sdf(
 	bool verbose = false;
 	int oW;
 	int oH;
-	sdfer_process_in_place(&img[0], w, h, downscale, spread, oW, oH, verbose);
+	ok_sdf_process_in_place(&img[0], w, h, downscale, spread, oW, oH, nullptr, verbose);
 
 	int oS = oW * oH;
 	if (expected_img.size() != oS)

@@ -4,7 +4,7 @@ sdfer 1.0
 
 Copyright 2021 Nils Jonas Norberg jnorberg@gmail.com
 
-License: BSD-3-Clause ( https://opensource.org/licenses/BSD-3-Clause )
+License: MIT ( https://opensource.org/licenses/mit )
 
 ### What is this repository for? ###
 
@@ -98,6 +98,6 @@ Known limits:
 
 ### Dependencies ###
 
-only external dependencies is a cpp compiler 
+sdfer relies on my "ok_sdf" library and requires that it's a sibling of this project in the filesystem.
 
 sdfer relies on stb_image and stb_image_write (included in src/dep)

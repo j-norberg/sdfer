@@ -11,10 +11,80 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "dep/stb_image_write.h"
 
-#include "sdfer.h"
+#include "../../ok_sdf/src/ok_sdf.h"
 #include "tests.h"
 
 
+
+
+
+
+void downsample_in_place(uint8_t* rgbx, uint8_t* downsampled_a, int downsample, int big_w, int big_h)
+{
+	int dw = big_w / downsample;
+	int dh = big_h / downsample;
+
+	int half = downsample / 2;
+
+	// fixme replace with multiply and shift
+	// and maybe make the downsample function even cheaper (by skipping pixels)
+	int div = downsample * downsample;
+
+	// dw, dh are the downsampled ones
+	for (int y = 0; y < dh; ++y)
+	{
+		for (int x = 0; x < dw; ++x)
+		{
+			const uint8_t alpha = *downsampled_a;
+			++downsampled_a;
+
+			const uint8_t* src = rgbx + (y*downsample*big_w*4) + (x*downsample)*4;
+			uint8_t* dst = rgbx + y*dw*4 + x*4;
+
+			if (alpha < 100)
+			{ 
+				// where alpha is low-ish, we're outside the expected image anyways...
+				// simple case here, just grab center(ish)-pixel
+				const uint8_t* p = src + (half*big_w * 4) + (half) * 4;
+				dst[0] = p[0];
+				dst[1] = p[1];
+				dst[2] = p[2];
+			}
+			else
+			{
+				int sumR = 0;
+				int sumG = 0;
+				int sumB = 0;
+				for (int yy = 0; yy < downsample; ++yy)
+				{
+					const uint8_t* row = src + yy * big_w*4;
+					for (int xx = 0; xx < downsample; ++xx)
+					{
+						sumR += row[0];
+						sumG += row[1];
+						sumB += row[2];
+						row += 4;
+					}
+				}
+				dst[0] = sumR / div;
+				dst[1] = sumG / div;
+				dst[2] = sumB / div;
+			}
+
+		}
+	}
+}
+
+void interleave_alpha(uint8_t* rgbx, uint8_t* alpha, int w, int h)
+{
+	int s = w * h;
+	for (int i = 0; i < s; ++i)
+	{
+		rgbx[3] = alpha[0];
+		rgbx += 4;
+		alpha += 1;
+	}
+}
 
 
 
@@ -93,6 +163,8 @@ opts:
 	-s=100 : spread     (integer 1+)         (default: 100)
 	-d=2   : downsample (integer 1+)         (default:   2)
 	-c     : crop
+	-k     : Keep RGB
+	-x     : Fix zero-alpha pixels from photoshop 
 
 	-f=png : out-file-format, one of: png, tga, bmp, jpg (default: png)
 
@@ -142,6 +214,17 @@ Explanation of the options:
 	This options will look at the output image and crop it so that
 	the fade touches the edges in each direction.
 
+-k Keep RGB
+	This options will keep the rgb components, and combine them
+	with the sdf in the alpha-channel (can not be combined with
+	crop or pad)
+
+-x Fix zero-alpha pixels from photoshop 
+	This options is only used with the "keep rgb" option. It will
+	attempt to "heal" the color-information in pixels with zero
+	alpha (that PS sets to white) by finding the closest pixel
+	with a non-zero alpha
+
 Examples go here:
 
 )"""";
@@ -164,23 +247,26 @@ struct Args
 
 	// actual opts
 	int threshold = 127;
-	bool invert = false;
-	bool pad = false;
 	int spread = 100;
 	int downsample = 2;
-	bool crop = false;
 	FileFormats file_format = ePng;
 
+	bool crop = false;
+	bool invert = false;
+	bool pad = false;
 	bool verbose = false;
 	bool help = false;
 	bool test = false;
+
+	bool keep_rgb = false;
+	bool keep_rgb_ps_fix = false;
 
 	// non-opts
 	std::vector<char*> file_names;
 };
 
 
-void handle_opts(Args& args_out, int argc, char**argv, int i)
+void handle_opts(Args& args_out, char**argv, int i)
 {
 	char* arg = argv[i];
 
@@ -228,6 +314,8 @@ void handle_opts(Args& args_out, int argc, char**argv, int i)
 		case 'i': args_out.invert = true;	break;
 		case 'p': args_out.pad = true;		break;
 		case 'v': args_out.verbose = true;	break;
+		case 'k': args_out.keep_rgb = true; break;
+		case 'x': args_out.keep_rgb_ps_fix = true; break;
 
 		default:
 			found = false;
@@ -246,9 +334,8 @@ void handle_opts(Args& args_out, int argc, char**argv, int i)
 		return;
 	}
 
-	char* eq = strchr(arg_run, '=');
-	bool has_value = eq != nullptr;
-	char* value = eq + 1;
+	bool has_value = (arg_run[1] == '=') && (arg_run[2] != 0);
+	char* value = arg_run + 2;
 
 	switch (*arg_run)
 	{
@@ -339,7 +426,7 @@ bool handle_args(Args& args_out, int argc, char**argv)
 
 		if (arg[0] == '-')
 		{
-			handle_opts(args_out, argc, argv, i);
+			handle_opts(args_out, argv, i);
 			continue;
 		}
 
@@ -391,6 +478,34 @@ bool handle_args(Args& args_out, int argc, char**argv)
 	{
 		printf("file-format need to be png, tga, jpg, or bmp\n");
 		ok = false;
+	}
+
+	if (args_out.keep_rgb_ps_fix && !args_out.keep_rgb)
+	{
+		printf("can not do ps-fix without keep-rgb\n");
+		ok = false;
+	}
+
+	if (args_out.keep_rgb)
+	{
+		if (args_out.pad)
+		{
+			printf("can not use pad with keep-rgb\n");
+			ok = false;
+		}
+
+		if (args_out.crop)
+		{
+			printf("can not use crop with keep-rgb\n");
+			ok = false;
+		}
+
+		if (args_out.file_format == eJpg)
+		{
+			printf("can not use keep-rgb when writing JPGs (since no alpha)\n");
+			ok = false;
+		}
+
 	}
 
 	if (args_out.opt_missing_value)
@@ -469,6 +584,7 @@ bool handle_one_image( const char* fname, Args args )
 	}
 
 	// fixme clarify how channels are picked in readme
+	uint8_t* stored_rgba = nullptr;
 	int extractChannel = 0;
 	if (channels == 4)
 	{
@@ -477,10 +593,40 @@ bool handle_one_image( const char* fname, Args args )
 			puts("detected 4-channel image, will extract alpha-channel");
 		}
 		extractChannel = 3; // alpha
+
+		if (args.keep_rgb)
+		{
+			if (args.crop)
+			{
+				puts("keep-rgb is not compatible with crop");
+				args.keep_rgb = false;
+			}
+
+			if (args.pad)
+			{
+				puts("keep-rgb is not compatible with pad");
+				args.keep_rgb = false;
+			}
+
+			if (args.file_format == eJpg)
+			{
+				puts("keep-rgb is not compatible with jpg file type");
+				args.keep_rgb = false;
+			}
+		}
+
+		if (args.keep_rgb)
+		{
+			puts("keeping rgb");
+
+			// leave room for alpha
+			stored_rgba = (uint8_t*)malloc(w*h*4); // rgbx
+			memcpy(stored_rgba, input_image, w*h*4);
+		}
 	}
 
 	// extract mask
-	sdfer_extract_mask_in_place(input_image, w, h, channels, extractChannel, args.threshold, args.invert);
+	ok_sdf_extract_mask_in_place(input_image, w, h, channels, extractChannel, args.threshold, args.invert);
 
 	int spread = args.spread;
 
@@ -491,7 +637,7 @@ bool handle_one_image( const char* fname, Args args )
 		int pw = w + spread * 2;
 		int ph = h + spread * 2;
 		uint8_t* dst_img = (uint8_t*)malloc(pw * ph);
-		sdfer_pad_mask(dst_img, input_image, w, h, spread);
+		ok_sdf_pad_mask(dst_img, input_image, w, h, spread);
 
 		// free old
 		stbi_image_free(input_image);
@@ -507,26 +653,84 @@ bool handle_one_image( const char* fname, Args args )
 		}
 	}
 
+	uint8_t* rgba_to_ps_fix = nullptr;
+	if (args.keep_rgb_ps_fix)
+	{
+		if (args.keep_rgb)
+		{
+			puts("ps-fix");
+			rgba_to_ps_fix = stored_rgba;
+		}
+		else
+		{
+			printf("ps-fix only available with keep-rgb\n");
+		}
+	}
+
+	//
+	int big_w = w;
+	int big_h = h;
+
 	// process
-	sdfer_process_in_place(input_image, w, h, args.downsample, args.spread, w, h);
+	ok_sdf_process_in_place(input_image, w, h, args.downsample, args.spread, w, h, rgba_to_ps_fix, args.verbose);
+
+	if (stored_rgba != nullptr)
+	{
+		// downsample rgb
+		if (args.downsample > 1)
+		{
+			downsample_in_place(stored_rgba, input_image, args.downsample, big_w, big_h);
+		}
+	}
 
 	if (args.crop)
 	{
-		sdfer_crop_image_in_place(input_image, w, h);
+		ok_sdf_crop_image_in_place(input_image, w, h);
 	}
 
 	// choose right file format
 	std::string outfname(fname);
-	outfname += ".sdf";
+
+	// remove ".png" (or something)
+	int period_pos = (int)outfname.size() - 4;
+	if (period_pos >= 0 && outfname[period_pos] == '.')
+	{
+		outfname.resize(period_pos);
+	}
+
+	// add suffix
+	outfname += "_sdf";
 	outfname += get_suffix(args.file_format);
 
 	int write_result = 0;
-	switch (args.file_format)
+
+	if (stored_rgba != nullptr)
 	{
+		interleave_alpha(stored_rgba, input_image, w, h);
+
+		switch (args.file_format)
+		{
+		case eUnknown: break;
+
+		case eBmp: write_result = stbi_write_bmp(outfname.c_str(), w, h, 4, stored_rgba);		break;
+		case eTga: write_result = stbi_write_tga(outfname.c_str(), w, h, 4, stored_rgba);		break;
+		case eJpg: write_result = -1; break; // no alpha on jpg
+		case ePng: write_result = stbi_write_png(outfname.c_str(), w, h, 4, stored_rgba, w*4);		break;
+		}
+
+		free(stored_rgba);
+	}
+	else
+	{
+		switch (args.file_format)
+		{
+		case eUnknown: break;
+
 		case eBmp: write_result = stbi_write_bmp(outfname.c_str(), w, h, 1, input_image);		break;
 		case eTga: write_result = stbi_write_tga(outfname.c_str(), w, h, 1, input_image);		break;
 		case eJpg: write_result = stbi_write_jpg(outfname.c_str(), w, h, 1, input_image, 80);	break;
 		case ePng: write_result = stbi_write_png(outfname.c_str(), w, h, 1, input_image, w);	break;
+		}
 	}
 
 	if (write_result == 0)

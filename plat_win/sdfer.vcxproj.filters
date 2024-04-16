@@ -18,7 +18,7 @@
     <ClCompile Include="..\src\main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\sdfer.cpp">
+    <ClCompile Include="..\..\ok_sdf\src\ok_sdf.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\src\tests.cpp">
@@ -32,10 +32,10 @@
     <ClInclude Include="..\src\dep\stb_image_write.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\sdfer.h">
+    <ClInclude Include="..\src\tests.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\tests.h">
+    <ClInclude Include="..\..\ok_sdf\src\ok_sdf.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
